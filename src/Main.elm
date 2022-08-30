@@ -79,6 +79,15 @@ view model =
     }
 
 
+generateCoordinates : Int -> List ( Int, Int )
+generateCoordinates n =
+    let
+        axis =
+            List.range 0 (n - 1)
+    in
+    List.concatMap (\a -> List.map (Tuple.pair a) axis) axis
+
+
 showMark : Mark -> String
 showMark mark =
     case mark of
@@ -125,7 +134,7 @@ getWinner ( rowOffset, colOffset ) board =
 
 makeMetaBoard : Board -> Board
 makeMetaBoard board =
-    List.concatMap (\r -> List.map (Tuple.pair r) [ 0, 1, 2 ]) [ 0, 1, 2 ]
+    generateCoordinates 3
         |> List.foldl
             (\( r, c ) ->
                 case getWinner ( 3 * r, 3 * c ) board of
@@ -150,7 +159,22 @@ viewBody model =
         active =
             Maybe.map (always False) winner |> Maybe.withDefault True
     in
-    Html.main_ []
+    Html.main_
+        [ Attr.css
+            [ Css.displayFlex
+            , Css.backgroundColor <| Css.hex "1d2021"
+            , Css.flexDirection Css.column
+            , Css.alignItems Css.center
+            , Css.justifyContent Css.center
+            , Css.position Css.absolute
+            , Css.top <| Css.rem 0
+            , Css.bottom <| Css.rem 0
+            , Css.left <| Css.rem 0
+            , Css.right <| Css.rem 0
+            , Css.paddingBottom <| Css.rem 8
+            , Css.fontFamily Css.sansSerif
+            ]
+        ]
         [ viewBoard active model.board metaBoard
         , Html.text <| "current turn: " ++ showMark model.current
         , Maybe.map viewWinner winner |> Maybe.withDefault (Html.text "")
@@ -167,62 +191,64 @@ viewWinner winner =
 
 viewBoard : Bool -> Board -> Board -> Html.Html Msg
 viewBoard active board metaBoard =
-    let
-        inds =
-            List.range 0 8
-
-        templateSpec =
-            "repeat(9, 1.5rem)"
-    in
     Html.div
         [ Attr.css
             [ Css.property "display" "grid"
-            , Css.property "grid-template-columns" templateSpec
-            , Css.property "grid-template-rows" templateSpec
+            , Css.property "grid-template-columns" "repeat(9, 1.5rem)"
+            , Css.property "grid-template-rows" "repeat(9, 1.5rem)"
+            , Css.property "gap" ".25rem"
+            , Css.fontFamily Css.monospace
+            , Css.fontWeight Css.bold
             ]
         ]
     <|
-        (inds
-            |> List.concatMap
-                (\row ->
-                    inds
-                        |> List.map
-                            (\col ->
-                                let
-                                    mark =
-                                        Dict.get ( row, col ) board
-                                in
-                                Html.div
-                                    [ Attr.css
-                                        [ Css.border3 (Css.px 1) Css.solid <| Css.rgb 0 0 0
-                                        , Css.textAlign Css.center
-                                        , Css.property "grid-row" <| String.fromInt <| row + 1
-                                        , Css.property "grid-column" <| String.fromInt <| col + 1
-                                        , Css.color <| Css.rgb 255 255 255
-                                        , Css.backgroundColor <|
-                                            case mark of
-                                                Just X ->
-                                                    Css.rgb 255 0 0
+        (generateCoordinates 9
+            |> List.map
+                (\( row, col ) ->
+                    let
+                        mark =
+                            Dict.get ( row, col ) board
 
-                                                Just O ->
-                                                    Css.rgb 0 0 255
+                        br i j =
+                            if modBy 3 row == i && modBy 3 col == j then
+                                Css.px 8
 
-                                                Nothing ->
-                                                    Css.rgba 0 0 0 0
-                                        ]
-                                    , Ev.onClick <|
-                                        if active then
-                                            Maybe.map (always Nop) mark
-                                                |> Maybe.withDefault (Click row col)
+                            else
+                                Css.px 2
+                    in
+                    Html.div
+                        [ Attr.css
+                            [ Css.textAlign Css.center
+                            , Css.property "grid-row" <| String.fromInt <| row + 1
+                            , Css.property "grid-column" <| String.fromInt <| col + 1
+                            , Css.borderRadius4 (br 0 0) (br 0 2) (br 2 2) (br 2 0)
+                            , Css.displayFlex
+                            , Css.alignItems Css.center
+                            , Css.justifyContent Css.center
+                            , Css.color <| Css.rgb 255 255 255
+                            , Css.backgroundColor <|
+                                case mark of
+                                    Just X ->
+                                        Css.hex "cc241d"
 
-                                        else
-                                            Nop
-                                    ]
-                                    [ Maybe.map showMark mark
-                                        |> Maybe.withDefault ""
-                                        |> Html.text
-                                    ]
-                            )
+                                    Just O ->
+                                        Css.hex "458588"
+
+                                    Nothing ->
+                                        Css.hex "32302f"
+                            ]
+                        , Ev.onClick <|
+                            if active then
+                                Maybe.map (always Nop) mark
+                                    |> Maybe.withDefault (Click row col)
+
+                            else
+                                Nop
+                        ]
+                        [ Maybe.map showMark mark
+                            |> Maybe.withDefault ""
+                            |> Html.text
+                        ]
                 )
         )
             ++ (Dict.toList metaBoard
@@ -234,15 +260,21 @@ viewBoard active board metaBoard =
                                     , Css.property "grid-column-start" <| String.fromInt <| 3 * metaCol + 1
                                     , Css.property "grid-row-end" "span 3"
                                     , Css.property "grid-column-end" "span 3"
+                                    , Css.color <| Css.rgb 255 255 255
+                                    , Css.displayFlex
+                                    , Css.alignItems Css.center
+                                    , Css.justifyContent Css.center
+                                    , Css.fontSize <| Css.rem 4
+                                    , Css.borderRadius <| Css.px 8
                                     , Css.backgroundColor <|
                                         case mark of
                                             X ->
-                                                Css.rgba 255 0 0 0.5
+                                                Css.hex "cc241d80"
 
                                             O ->
-                                                Css.rgba 0 0 255 0.5
+                                                Css.hex "45858880"
                                     ]
                                 ]
-                                []
+                                [ Html.text <| showMark mark ]
                         )
                )
