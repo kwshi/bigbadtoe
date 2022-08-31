@@ -8,18 +8,29 @@ import Html.Styled.Attributes as Attr
 import Html.Styled.Events as Ev
 
 
-type Mark
+type Player
     = X
     | O
 
 
+type Outcome
+    = Incomplete
+    | WonBy Player
+    | Tie
+
+
 type alias Board =
-    Dict.Dict ( Int, Int ) Mark
+    Dict.Dict ( Int, Int ) Outcome
+
+
+boardGet : ( Int, Int ) -> Board -> Outcome
+boardGet pos =
+    Dict.get pos >> Maybe.withDefault Incomplete
 
 
 type alias Model =
     { board : Board
-    , current : Mark
+    , current : Player
     }
 
 
@@ -44,9 +55,9 @@ init () =
     ( { board = Dict.empty, current = X }, Cmd.none )
 
 
-toggle : Mark -> Mark
-toggle mark =
-    case mark of
+toggle : Player -> Player
+toggle player =
+    case player of
         X ->
             O
 
@@ -59,7 +70,7 @@ update msg model =
     case msg of
         Click row col ->
             ( { model
-                | board = Dict.insert ( row, col ) model.current model.board
+                | board = Dict.insert ( row, col ) (WonBy model.current) model.board
                 , current = toggle model.current
               }
             , Cmd.none
@@ -88,8 +99,8 @@ generateCoordinates n =
     List.concatMap (\a -> List.map (Tuple.pair a) axis) axis
 
 
-showMark : Mark -> String
-showMark mark =
+showPlayer : Player -> String
+showPlayer mark =
     case mark of
         X ->
             "X"
@@ -98,14 +109,34 @@ showMark mark =
             "O"
 
 
-getWinner : ( Int, Int ) -> Board -> Maybe Mark
+collectOutcomes : List Outcome -> Outcome
+collectOutcomes =
+    List.foldl
+        (\outcomeSoFar lineOutcome ->
+            case ( outcomeSoFar, lineOutcome ) of
+                ( WonBy _, _ ) ->
+                    outcomeSoFar
+
+                ( _, WonBy _ ) ->
+                    lineOutcome
+
+                ( Tie, _ ) ->
+                    lineOutcome
+
+                ( Incomplete, _ ) ->
+                    Incomplete
+        )
+        Tie
+
+
+getWinner : ( Int, Int ) -> Board -> Outcome
 getWinner ( rowOffset, colOffset ) board =
     let
         rows =
-            [ rowOffset, rowOffset + 1, rowOffset + 2 ]
+            List.range rowOffset (rowOffset + 2)
 
         cols =
-            [ colOffset, colOffset + 1, colOffset + 2 ]
+            List.range colOffset (colOffset + 2)
 
         lines =
             -- horizontals
@@ -118,33 +149,28 @@ getWinner ( rowOffset, colOffset ) board =
                      List.map2 Tuple.pair (List.reverse rows) cols
                    ]
 
-        getLine line =
-            case List.filterMap (\cell -> Dict.get cell board) line of
-                [ X, X, X ] ->
-                    Just X
+        getLineOutcome line =
+            case List.map (\cell -> boardGet cell board) line of
+                [ WonBy X, WonBy X, WonBy X ] ->
+                    WonBy X
 
-                [ O, O, O ] ->
-                    Just O
+                [ WonBy O, WonBy O, WonBy O ] ->
+                    WonBy O
+
+                [ WonBy _, WonBy _, WonBy _ ] ->
+                    Tie
 
                 _ ->
-                    Nothing
+                    Incomplete
     in
-    List.filterMap getLine lines |> List.head
+    List.map getLineOutcome lines |> collectOutcomes
 
 
 makeMetaBoard : Board -> Board
 makeMetaBoard board =
     generateCoordinates 3
-        |> List.foldl
-            (\( r, c ) ->
-                case getWinner ( 3 * r, 3 * c ) board of
-                    Nothing ->
-                        identity
-
-                    Just mark ->
-                        Dict.insert ( r, c ) mark
-            )
-            Dict.empty
+        |> List.map (\( r, c ) -> ( ( r, c ), getWinner ( 3 * r, 3 * c ) board ))
+        |> Dict.fromList
 
 
 viewBody : Model -> Html.Html Msg
@@ -153,11 +179,11 @@ viewBody model =
         metaBoard =
             makeMetaBoard model.board
 
-        winner =
+        outcome =
             getWinner ( 0, 0 ) metaBoard
 
         active =
-            Maybe.map (always False) winner |> Maybe.withDefault True
+            outcome == Incomplete
     in
     Html.main_
         [ Attr.css
@@ -176,16 +202,18 @@ viewBody model =
             ]
         ]
         [ viewBoard active model.board metaBoard
-        , Html.text <| "current turn: " ++ showMark model.current
-        , Maybe.map viewWinner winner |> Maybe.withDefault (Html.text "")
+        , Html.text <| "current turn: " ++ showPlayer model.current
+        , Html.text <|
+            case outcome of
+                WonBy p ->
+                    "winner! " ++ showPlayer p
+
+                Tie ->
+                    "tie!"
+
+                Incomplete ->
+                    ""
         , Html.button [ Ev.onClick Restart ] [ Html.text "restart" ]
-        ]
-
-
-viewWinner : Mark -> Html.Html Msg
-viewWinner winner =
-    Html.div []
-        [ Html.text <| "winner! " ++ showMark winner
         ]
 
 
@@ -194,11 +222,12 @@ viewBoard active board metaBoard =
     Html.div
         [ Attr.css
             [ Css.property "display" "grid"
-            , Css.property "grid-template-columns" "repeat(9, 1.5rem)"
-            , Css.property "grid-template-rows" "repeat(9, 1.5rem)"
+            , Css.property "grid-template-columns" "repeat(9, 2rem)"
+            , Css.property "grid-template-rows" "repeat(9, 2rem)"
             , Css.property "gap" ".25rem"
             , Css.fontFamily Css.monospace
             , Css.fontWeight Css.bold
+            , Css.fontSize <| Css.rem 1.5
             ]
         ]
     <|
@@ -206,8 +235,8 @@ viewBoard active board metaBoard =
             |> List.map
                 (\( row, col ) ->
                     let
-                        mark =
-                            Dict.get ( row, col ) board
+                        cell =
+                            boardGet ( row, col ) board
 
                         br i j =
                             if modBy 3 row == i && modBy 3 col == j then
@@ -227,33 +256,37 @@ viewBoard active board metaBoard =
                             , Css.justifyContent Css.center
                             , Css.color <| Css.rgb 255 255 255
                             , Css.backgroundColor <|
-                                case mark of
-                                    Just X ->
+                                case cell of
+                                    WonBy X ->
                                         Css.hex "cc241d"
 
-                                    Just O ->
+                                    WonBy O ->
                                         Css.hex "458588"
 
-                                    Nothing ->
+                                    _ ->
                                         Css.hex "32302f"
                             ]
                         , Ev.onClick <|
-                            if active then
-                                Maybe.map (always Nop) mark
-                                    |> Maybe.withDefault (Click row col)
+                            case ( active, cell ) of
+                                ( True, Incomplete ) ->
+                                    Click row col
 
-                            else
-                                Nop
+                                _ ->
+                                    Nop
                         ]
-                        [ Maybe.map showMark mark
-                            |> Maybe.withDefault ""
-                            |> Html.text
+                        [ Html.text <|
+                            case cell of
+                                WonBy p ->
+                                    showPlayer p
+
+                                _ ->
+                                    ""
                         ]
                 )
         )
             ++ (Dict.toList metaBoard
                     |> List.map
-                        (\( ( metaRow, metaCol ), mark ) ->
+                        (\( ( metaRow, metaCol ), outcome ) ->
                             Html.div
                                 [ Attr.css
                                     [ Css.property "grid-row-start" <| String.fromInt <| 3 * metaRow + 1
@@ -264,17 +297,29 @@ viewBoard active board metaBoard =
                                     , Css.displayFlex
                                     , Css.alignItems Css.center
                                     , Css.justifyContent Css.center
-                                    , Css.fontSize <| Css.rem 4
+                                    , Css.fontSize <| Css.rem 6
                                     , Css.borderRadius <| Css.px 8
-                                    , Css.backgroundColor <|
-                                        case mark of
-                                            X ->
-                                                Css.hex "cc241d80"
+                                    , case outcome of
+                                        WonBy X ->
+                                            Css.backgroundColor <| Css.hex "cc241da0"
 
-                                            O ->
-                                                Css.hex "45858880"
+                                        WonBy O ->
+                                            Css.backgroundColor <| Css.hex "458588a0"
+
+                                        Incomplete ->
+                                            Css.visibility Css.hidden
+
+                                        Tie ->
+                                            Css.backgroundColor <| Css.hex "928374e0"
                                     ]
                                 ]
-                                [ Html.text <| showMark mark ]
+                                [ Html.text <|
+                                    case outcome of
+                                        WonBy p ->
+                                            showPlayer p
+
+                                        _ ->
+                                            ""
+                                ]
                         )
                )
