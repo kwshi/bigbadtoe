@@ -2,41 +2,24 @@ module Main exposing (..)
 
 import Browser
 import Css
-import Dict
+import Game
+import Game.Outcome
+import Game.Player
 import Html.Styled as Html
 import Html.Styled.Attributes as Attr
 import Html.Styled.Events as Ev
-
-
-type Player
-    = X
-    | O
-
-
-type Outcome
-    = Incomplete
-    | WonBy Player
-    | Tie
-
-
-type alias Board =
-    Dict.Dict ( Int, Int ) Outcome
-
-
-boardGet : ( Int, Int ) -> Board -> Outcome
-boardGet pos =
-    Dict.get pos >> Maybe.withDefault Incomplete
+import Style
 
 
 type alias Model =
-    { board : Board
-    , current : Player
+    { game : Game.State
+    , resetConfirm : Maybe Bool
     }
 
 
 type Msg
-    = Click Int Int
-    | Restart
+    = Click ( Int, Int )
+    | Reset
     | Nop
 
 
@@ -52,32 +35,30 @@ main =
 
 init : () -> ( Model, Cmd Msg )
 init () =
-    ( { board = Dict.empty, current = X }, Cmd.none )
-
-
-toggle : Player -> Player
-toggle player =
-    case player of
-        X ->
-            O
-
-        O ->
-            X
+    ( { game = Game.init 3 3
+      , resetConfirm = Nothing
+      }
+    , Cmd.none
+    )
 
 
 update : Msg -> Model -> ( Model, Cmd Msg )
 update msg model =
     case msg of
-        Click row col ->
+        Click path ->
             ( { model
-                | board = Dict.insert ( row, col ) (WonBy model.current) model.board
-                , current = toggle model.current
+                | game = Game.click path model.game
+                , resetConfirm = Just False
               }
             , Cmd.none
             )
 
-        Restart ->
-            init ()
+        Reset ->
+            if model.resetConfirm == Just True then
+                init ()
+
+            else
+                ( { model | resetConfirm = Just True }, Cmd.none )
 
         Nop ->
             ( model, Cmd.none )
@@ -85,241 +66,133 @@ update msg model =
 
 view : Model -> Browser.Document Msg
 view model =
-    { title = "hi"
-    , body = [ Html.toUnstyled <| viewBody model ]
+    { title = "bigbadtoe"
+    , body = List.map Html.toUnstyled [ viewBody model ]
     }
-
-
-generateCoordinates : Int -> List ( Int, Int )
-generateCoordinates n =
-    let
-        axis =
-            List.range 0 (n - 1)
-    in
-    List.concatMap (\a -> List.map (Tuple.pair a) axis) axis
-
-
-showPlayer : Player -> String
-showPlayer mark =
-    case mark of
-        X ->
-            "X"
-
-        O ->
-            "O"
-
-
-collectOutcomes : List Outcome -> Outcome
-collectOutcomes =
-    List.foldl
-        (\outcomeSoFar lineOutcome ->
-            case ( outcomeSoFar, lineOutcome ) of
-                ( WonBy _, _ ) ->
-                    outcomeSoFar
-
-                ( _, WonBy _ ) ->
-                    lineOutcome
-
-                ( Tie, _ ) ->
-                    lineOutcome
-
-                ( Incomplete, _ ) ->
-                    Incomplete
-        )
-        Tie
-
-
-getWinner : ( Int, Int ) -> Board -> Outcome
-getWinner ( rowOffset, colOffset ) board =
-    let
-        rows =
-            List.range rowOffset (rowOffset + 2)
-
-        cols =
-            List.range colOffset (colOffset + 2)
-
-        lines =
-            -- horizontals
-            List.map (\r -> List.map (\c -> ( r, c )) cols) rows
-                ++ -- verticals
-                   List.map (\c -> List.map (\r -> ( r, c )) rows) cols
-                ++ [ -- diagonal
-                     List.map2 Tuple.pair rows cols
-                   , --antidiagonal
-                     List.map2 Tuple.pair (List.reverse rows) cols
-                   ]
-
-        getLineOutcome line =
-            case List.map (\cell -> boardGet cell board) line of
-                [ WonBy X, WonBy X, WonBy X ] ->
-                    WonBy X
-
-                [ WonBy O, WonBy O, WonBy O ] ->
-                    WonBy O
-
-                [ WonBy _, WonBy _, WonBy _ ] ->
-                    Tie
-
-                _ ->
-                    Incomplete
-    in
-    List.map getLineOutcome lines |> collectOutcomes
-
-
-makeMetaBoard : Board -> Board
-makeMetaBoard board =
-    generateCoordinates 3
-        |> List.map (\( r, c ) -> ( ( r, c ), getWinner ( 3 * r, 3 * c ) board ))
-        |> Dict.fromList
 
 
 viewBody : Model -> Html.Html Msg
 viewBody model =
     let
-        metaBoard =
-            makeMetaBoard model.board
-
-        outcome =
-            getWinner ( 0, 0 ) metaBoard
-
-        active =
-            outcome == Incomplete
+        game =
+            Game.render model.game
     in
     Html.main_
         [ Attr.css
-            [ Css.displayFlex
-            , Css.backgroundColor <| Css.hex "1d2021"
-            , Css.flexDirection Css.column
-            , Css.alignItems Css.center
-            , Css.justifyContent Css.center
-            , Css.position Css.absolute
-            , Css.top <| Css.rem 0
-            , Css.bottom <| Css.rem 0
-            , Css.left <| Css.rem 0
-            , Css.right <| Css.rem 0
-            , Css.paddingBottom <| Css.rem 8
-            , Css.fontFamily Css.sansSerif
+            [ Css.backgroundColor <| Css.rgb 0x1D 0x20 0x21
+            , Style.full
             ]
         ]
-        [ viewBoard active model.board metaBoard
-        , Html.text <| "current turn: " ++ showPlayer model.current
-        , Html.text <|
-            case outcome of
-                WonBy p ->
-                    "winner! " ++ showPlayer p
-
-                Tie ->
-                    "tie!"
-
-                Incomplete ->
-                    ""
-        , Html.button [ Ev.onClick Restart ] [ Html.text "restart" ]
-        ]
-
-
-viewBoard : Bool -> Board -> Board -> Html.Html Msg
-viewBoard active board metaBoard =
-    Html.div
-        [ Attr.css
-            [ Css.property "display" "grid"
-            , Css.property "grid-template-columns" "repeat(9, 2rem)"
-            , Css.property "grid-template-rows" "repeat(9, 2rem)"
-            , Css.property "gap" ".25rem"
-            , Css.fontFamily Css.monospace
-            , Css.fontWeight Css.bold
-            , Css.fontSize <| Css.rem 1.5
+        [ Html.div
+            [ Attr.css <|
+                [ Css.backgroundColor
+                    (Game.Outcome.getWinner game.outcome
+                        |> Maybe.map (Game.Player.color <| 1 / 2)
+                        |> Maybe.withDefault (Css.rgba 0 0 0 0)
+                    )
+                , Css.displayFlex
+                , Css.justifyContent Css.center
+                , Css.alignItems Css.center
+                , Style.full
+                ]
             ]
-        ]
-    <|
-        (generateCoordinates 9
-            |> List.map
-                (\( row, col ) ->
-                    let
-                        cell =
-                            boardGet ( row, col ) board
-
-                        br i j =
-                            if modBy 3 row == i && modBy 3 col == j then
-                                Css.px 8
-
-                            else
-                                Css.px 2
-                    in
-                    Html.div
-                        [ Attr.css
-                            [ Css.textAlign Css.center
-                            , Css.property "grid-row" <| String.fromInt <| row + 1
-                            , Css.property "grid-column" <| String.fromInt <| col + 1
-                            , Css.borderRadius4 (br 0 0) (br 0 2) (br 2 2) (br 2 0)
-                            , Css.displayFlex
-                            , Css.alignItems Css.center
-                            , Css.justifyContent Css.center
-                            , Css.color <| Css.rgb 255 255 255
-                            , Css.backgroundColor <|
-                                case cell of
-                                    WonBy X ->
-                                        Css.hex "cc241d"
-
-                                    WonBy O ->
-                                        Css.hex "458588"
-
-                                    _ ->
-                                        Css.hex "32302f"
-                            ]
-                        , Ev.onClick <|
-                            case ( active, cell ) of
-                                ( True, Incomplete ) ->
-                                    Click row col
-
-                                _ ->
-                                    Nop
-                        ]
-                        [ Html.text <|
-                            case cell of
-                                WonBy p ->
-                                    showPlayer p
-
-                                _ ->
-                                    ""
-                        ]
-                )
-        )
-            ++ (Dict.toList metaBoard
-                    |> List.map
-                        (\( ( metaRow, metaCol ), outcome ) ->
-                            Html.div
-                                [ Attr.css
-                                    [ Css.property "grid-row-start" <| String.fromInt <| 3 * metaRow + 1
-                                    , Css.property "grid-column-start" <| String.fromInt <| 3 * metaCol + 1
-                                    , Css.property "grid-row-end" "span 3"
-                                    , Css.property "grid-column-end" "span 3"
-                                    , Css.color <| Css.rgb 255 255 255
-                                    , Css.displayFlex
-                                    , Css.alignItems Css.center
-                                    , Css.justifyContent Css.center
-                                    , Css.fontSize <| Css.rem 6
-                                    , Css.borderRadius <| Css.px 8
-                                    , case outcome of
-                                        WonBy X ->
-                                            Css.backgroundColor <| Css.hex "cc241da0"
-
-                                        WonBy O ->
-                                            Css.backgroundColor <| Css.hex "458588a0"
-
-                                        Incomplete ->
-                                            Css.visibility Css.hidden
-
-                                        Tie ->
-                                            Css.backgroundColor <| Css.hex "928374e0"
-                                    ]
+            [ Html.div
+                [ Attr.css
+                    [ Css.paddingBottom <| Css.rem 8
+                    , Css.fontFamily Css.monospace
+                    , Css.property "display" "grid"
+                    , Css.property "grid-template-areas" <|
+                        String.join " " <|
+                            List.map (\row -> "\"" ++ String.join " " row ++ "\"")
+                                [ [ "title", "by", "links" ]
+                                , [ "board", "board", "board" ]
+                                , [ "control", "control", "message" ]
                                 ]
-                                [ Html.text <|
-                                    case outcome of
-                                        WonBy p ->
-                                            showPlayer p
-
-                                        _ ->
-                                            ""
-                                ]
+                    , Css.property "column-gap" ".5rem"
+                    , Css.property "row-gap" ".5rem"
+                    , Css.property "grid-template-columns" "auto auto auto"
+                    ]
+                ]
+                [ Html.h1
+                    [ Attr.css
+                        [ Css.margin2 (Css.rem 0) (Css.rem <| 1 / 4)
+                        , Css.fontSize <| Css.rem 2
+                        , Css.alignSelf Css.baseline
+                        ]
+                    ]
+                  <|
+                    List.map
+                        (\( color, text ) ->
+                            Html.span
+                                [ Attr.css [ Css.color <| Css.hex color ] ]
+                                [ Html.text text ]
                         )
-               )
+                        [ ( "fb4934", "big" ), ( "83a598", "bad" ), ( "ebdbb2", "toe" ) ]
+                , Html.h2
+                    [ Attr.css
+                        [ Css.property "grid-area" "by"
+                        , Css.margin <| Css.rem 0
+                        , Css.fontSize <| Css.rem 1
+                        , Css.color <| Css.hex "ebdbb2"
+                        , Css.fontWeight Css.normal
+                        , Css.alignSelf Css.baseline
+                        ]
+                    ]
+                    [ Html.text "by @kwshi" ]
+                , Html.map
+                    (if Game.Outcome.isComplete game.outcome then
+                        always Nop
+
+                     else
+                        Click
+                    )
+                    game.view
+                , Html.div
+                    [ Attr.css
+                        [ Css.property "grid-area" "control"
+                        , Css.minHeight <| Css.rem 2
+                        , Css.margin <| Css.rem <| 1 / 4
+                        ]
+                    ]
+                    [ model.resetConfirm
+                        |> Maybe.map
+                            (\confirm ->
+                                Html.button
+                                    [ Ev.onClick Reset
+                                    , Attr.css
+                                        [ Css.backgroundColor <|
+                                            if confirm then
+                                                Css.rgb 0xD7 0x99 0x21
+
+                                            else
+                                                Css.rgb 0x68 0x9D 0x6A
+                                        , Css.active
+                                            [ Css.backgroundColor <|
+                                                if confirm then
+                                                    Css.rgb 0xFA 0xBD 0x2F
+
+                                                else
+                                                    Css.rgb 0xB8 0xBB 0x26
+                                            ]
+                                        , Css.cursor Css.pointer
+                                        , Css.color <| Css.rgb 0 0 0
+                                        , Css.fontFamily Css.inherit
+                                        , Css.borderStyle Css.none
+                                        , Css.padding2 (Css.rem <| 1 / 4) (Css.rem <| 1 / 2)
+                                        , Css.borderRadius <| Css.px 2
+                                        , Css.fontWeight Css.bold
+                                        ]
+                                    ]
+                                    [ Html.text <|
+                                        if confirm then
+                                            "reset (confirm?)"
+
+                                        else
+                                            "reset"
+                                    ]
+                            )
+                        |> Maybe.withDefault (Html.text "")
+                    ]
+                ]
+            ]
+        ]
