@@ -2,11 +2,12 @@ module Game.Outcome exposing
     ( Outcome(..)
     , collectLineOutcomes
     , color
+    , colorBright
     , fromSingleCell
     , getLineOutcome
     , getWinner
-    , isComplete
-    , subgridView
+    , viewStatus
+    , viewSubgrid
     )
 
 import Css
@@ -25,18 +26,23 @@ color : Float -> Outcome -> Css.Color
 color alpha outcome =
     case outcome of
         Incomplete ->
-            Css.rgba 0x32 0x30 0x2F alpha
+            Css.rgba 0 0 0 0
 
         WonBy player ->
             Player.color alpha player
 
         Tie ->
-            Css.rgba 0x92 0x83 0x74 alpha
+            Css.rgba 0x7C 0x6F 0x64 alpha
 
 
-isComplete : Outcome -> Bool
-isComplete =
-    not << (==) Incomplete
+colorBright : Outcome -> Css.Color
+colorBright outcome =
+    case outcome of
+        WonBy player ->
+            Player.colorBright player
+
+        _ ->
+            Css.rgb 0xEB 0xDB 0xB2
 
 
 collectLineOutcomes : List Outcome -> Outcome
@@ -105,8 +111,8 @@ getWinner outcome =
             Nothing
 
 
-subgridView : Outcome -> Html.Html Int
-subgridView outcome =
+viewSubgrid : Outcome -> Html.Html Int
+viewSubgrid outcome =
     Html.div
         [ Attr.css <|
             [ Css.position Css.absolute
@@ -114,11 +120,11 @@ subgridView outcome =
             , Css.alignItems Css.center
             , Css.justifyContent Css.center
             , Css.color <| Css.rgb 255 255 255
-            , if isComplete outcome then
-                Css.visibility Css.visible
+            , if outcome == Incomplete then
+                Css.visibility Css.hidden
 
               else
-                Css.visibility Css.hidden
+                Css.visibility Css.visible
             , Css.fontSize <| Css.rem 6
             , Css.backgroundColor <| color (3 / 4) outcome
             ]
@@ -131,3 +137,17 @@ subgridView outcome =
                 |> Maybe.withDefault ""
             )
         ]
+
+
+viewStatus : Player.Player -> Outcome -> Html.Html msg
+viewStatus currentPlayer outcome =
+    Html.span [] <|
+        case outcome of
+            WonBy player ->
+                [ Html.text "mmm… ", Player.viewText player, Html.text " wins." ]
+
+            Tie ->
+                [ Html.text "hmmm… it's a tie." ]
+
+            Incomplete ->
+                [ Player.viewText currentPlayer, Html.text "’s turn to play." ]

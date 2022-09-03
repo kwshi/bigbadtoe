@@ -2,7 +2,7 @@ module Main exposing (..)
 
 import Browser
 import Css
-import Game
+import Game.Grid
 import Game.Outcome
 import Game.Player
 import Html.Styled as Html
@@ -12,7 +12,8 @@ import Style
 
 
 type alias Model =
-    { game : Game.State
+    { grid : Game.Grid.Grid (Game.Grid.Grid (Maybe Game.Player.Player))
+    , currentPlayer : Game.Player.Player
     , resetConfirm : Maybe Bool
     }
 
@@ -35,7 +36,8 @@ main =
 
 init : () -> ( Model, Cmd Msg )
 init () =
-    ( { game = Game.init 3 3
+    ( { grid = Game.Grid.init 3 <| Game.Grid.init 3 Nothing
+      , currentPlayer = Game.Player.X
       , resetConfirm = Nothing
       }
     , Cmd.none
@@ -45,9 +47,13 @@ init () =
 update : Msg -> Model -> ( Model, Cmd Msg )
 update msg model =
     case msg of
-        Click path ->
+        Click ( i, j ) ->
             ( { model
-                | game = Game.click path model.game
+                | grid =
+                    Game.Grid.update i
+                        (Game.Grid.set j <| Just model.currentPlayer)
+                        model.grid
+                , currentPlayer = Game.Player.toggle model.currentPlayer
                 , resetConfirm = Just False
               }
             , Cmd.none
@@ -71,11 +77,88 @@ view model =
     }
 
 
+viewHeader : Html.Html msg
+viewHeader =
+    Html.header
+        [ Attr.css
+            [ Css.displayFlex
+            , Css.padding2 (Css.rem 0) (Css.rem 1)
+            ]
+        ]
+        [ Html.h1
+            [ Attr.css
+                [ Css.margin <| Css.rem 0
+                , Css.fontSize <| Css.rem 2
+                , Css.alignSelf Css.baseline
+                ]
+            ]
+          <|
+            List.map
+                (\( outcome, text ) ->
+                    Html.span
+                        [ Attr.css [ Css.color <| Game.Outcome.colorBright outcome ] ]
+                        [ Html.text text ]
+                )
+                [ ( Game.Outcome.WonBy Game.Player.X, "big" )
+                , ( Game.Outcome.WonBy Game.Player.O, "bad" )
+                , ( Game.Outcome.Tie, "toe" )
+                ]
+        , Html.h2
+            [ Attr.css
+                [ Css.property "grid-area" "by"
+                , Css.margin <| Css.rem 0
+                , Css.marginLeft <| Css.rem 1
+                , Css.fontSize <| Css.rem 1
+                , Css.color <| Css.hex "ebdbb2"
+                , Css.fontWeight Css.normal
+                , Css.alignSelf Css.baseline
+                ]
+            ]
+            [ Html.text "by "
+            , Html.a
+                [ Attr.href "https://kshi.xyz"
+                , Attr.css
+                    [ Css.fontWeight Css.bold
+                    , Css.color <| Css.rgb 0x68 0x9D 0x6A
+                    , Css.property "text-decoration-color" "#689d6a80"
+                    , Css.hover
+                        [ Css.color <| Css.rgb 0x8E 0xC0 0x7C ]
+                    ]
+                ]
+                [ Html.text "kshi" ]
+            ]
+        ]
+
+
 viewBody : Model -> Html.Html Msg
 viewBody model =
     let
-        game =
-            Game.render model.game
+        renderSubgrid subgrid =
+            let
+                subOutcome =
+                    Game.Grid.map Game.Outcome.fromSingleCell subgrid |> Game.Grid.getOutcome
+            in
+            { outcome = subOutcome
+            , view =
+                Html.div
+                    [ Attr.css
+                        [ Css.position Css.relative
+                        , Css.overflow Css.hidden
+                        , Css.borderRadius <| Css.rem 1
+                        , Css.margin <| Css.rem <| 1 / 4
+                        ]
+                    ]
+                    [ Html.map Tuple.first <|
+                        Game.Grid.view Game.Player.viewCell subgrid
+                    , Game.Outcome.viewSubgrid subOutcome
+                    ]
+            }
+
+        subgrids =
+            Game.Grid.map renderSubgrid model.grid
+
+        outcome =
+            Game.Grid.map .outcome subgrids |> Game.Grid.getOutcome
     in
     Html.main_
         [ Attr.css
@@ -85,12 +168,7 @@ viewBody model =
         ]
         [ Html.div
             [ Attr.css <|
-                [ Css.backgroundColor
-                    (Game.Outcome.getWinner game.outcome
-                        |> Maybe.map (Game.Player.color <| 1 / 2)
-                        |> Maybe.withDefault (Css.rgba 0 0 0 0)
-                    )
-                , Css.displayFlex
+                [ Css.displayFlex
                 , Css.justifyContent Css.center
                 , Css.alignItems Css.center
                 , Style.full
@@ -104,54 +182,40 @@ viewBody model =
                     , Css.property "grid-template-areas" <|
                         String.join " " <|
                             List.map (\row -> "\"" ++ String.join " " row ++ "\"")
-                                [ [ "title", "by", "links" ]
-                                , [ "board", "board", "board" ]
-                                , [ "control", "control", "message" ]
+                                [ [ "header", "header" ]
+                                , [ "board", "board" ]
+                                , [ "control", "status" ]
                                 ]
                     , Css.property "column-gap" ".5rem"
                     , Css.property "row-gap" ".5rem"
                     , Css.property "grid-template-columns" "auto auto auto"
                     ]
                 ]
-                [ Html.h1
+                [ viewHeader
+                , Html.div
                     [ Attr.css
-                        [ Css.margin2 (Css.rem 0) (Css.rem <| 1 / 4)
-                        , Css.fontSize <| Css.rem 2
-                        , Css.alignSelf Css.baseline
+                        [ Css.property "grid-area" "board"
+                        , Css.property "user-select" "none"
+                        , Css.backgroundColor <| Game.Outcome.color 1 outcome
+                        , Css.padding <| Css.rem <| 3 / 4
+                        , Css.borderRadius <| Css.rem <| 7 / 4
                         ]
                     ]
-                  <|
-                    List.map
-                        (\( color, text ) ->
-                            Html.span
-                                [ Attr.css [ Css.color <| Css.hex color ] ]
-                                [ Html.text text ]
-                        )
-                        [ ( "fb4934", "big" ), ( "83a598", "bad" ), ( "ebdbb2", "toe" ) ]
-                , Html.h2
-                    [ Attr.css
-                        [ Css.property "grid-area" "by"
-                        , Css.margin <| Css.rem 0
-                        , Css.fontSize <| Css.rem 1
-                        , Css.color <| Css.hex "ebdbb2"
-                        , Css.fontWeight Css.normal
-                        , Css.alignSelf Css.baseline
-                        ]
-                    ]
-                    [ Html.text "by @kwshi" ]
-                , Html.map
-                    (if Game.Outcome.isComplete game.outcome then
-                        always Nop
+                    [ Game.Grid.view .view subgrids ]
+                    |> Html.map
+                        (if outcome == Game.Outcome.Incomplete then
+                            Click
 
-                     else
-                        Click
-                    )
-                    game.view
+                         else
+                            always Nop
+                        )
                 , Html.div
                     [ Attr.css
                         [ Css.property "grid-area" "control"
                         , Css.minHeight <| Css.rem 2
-                        , Css.margin <| Css.rem <| 1 / 4
+                        , Css.alignSelf Css.center
+                        , Css.fontSize <| Css.rem 1
+                        , Css.padding2 (Css.rem 0) (Css.rem 1)
                         ]
                     ]
                     [ model.resetConfirm
@@ -165,8 +229,8 @@ viewBody model =
                                                 Css.rgb 0xD7 0x99 0x21
 
                                             else
-                                                Css.rgb 0x68 0x9D 0x6A
-                                        , Css.active
+                                                Css.rgb 0x98 0x97 0x1A
+                                        , Css.hover
                                             [ Css.backgroundColor <|
                                                 if confirm then
                                                     Css.rgb 0xFA 0xBD 0x2F
@@ -179,8 +243,9 @@ viewBody model =
                                         , Css.fontFamily Css.inherit
                                         , Css.borderStyle Css.none
                                         , Css.padding2 (Css.rem <| 1 / 4) (Css.rem <| 1 / 2)
-                                        , Css.borderRadius <| Css.px 2
+                                        , Css.borderRadius <| Css.rem <| 1 / 4
                                         , Css.fontWeight Css.bold
+                                        , Css.fontSize Css.inherit
                                         ]
                                     ]
                                     [ Html.text <|
@@ -193,6 +258,17 @@ viewBody model =
                             )
                         |> Maybe.withDefault (Html.text "")
                     ]
+                , Html.div
+                    [ Attr.css
+                        [ Css.property "grid-area" "status"
+                        , Css.padding2 (Css.rem 0) (Css.rem 1)
+                        , Css.textAlign Css.right
+                        , Css.color <| Css.rgb 0xEB 0xDB 0xB2
+                        , Css.fontSize <| Css.rem 1
+                        , Css.alignSelf Css.center
+                        ]
+                    ]
+                    [ Game.Outcome.viewStatus model.currentPlayer outcome ]
                 ]
             ]
         ]
